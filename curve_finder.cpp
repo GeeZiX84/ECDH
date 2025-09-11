@@ -7,7 +7,7 @@
 #include <chrono>
 using namespace std;
 #include <boost/multiprecision/cpp_int.hpp>
-
+#include <fstream>
 
 
 struct point
@@ -189,7 +189,7 @@ public:
           return -1;
      }
 
-     vector<point> list_points(bool print = true)
+     vector<point> list_points(bool print = false)
      {
           vector<point> pts;
           for (int64_t x = 0; x < P; ++x)
@@ -265,49 +265,49 @@ public:
 
 int main()
 {
-     int64_t A;
-     int64_t B;
-     int64_t P; // 2^256 - 2^32 - 977
-     ECDH curve(A, B, P);
+     for (int64_t A = 0; A < 100; A++){
+          for (int64_t B = 0; B < 100; B++){
+               if (4 * A * A * A + 27 * B * B != 0){
+                    int64_t P = 2267; 
+                    ECDH curve(A, B, P);
+                    
+                    auto pts = curve.list_points();
 
-     cout << "Все точки кривой:\n";
-     auto pts = curve.list_points();
+                    point G = pts.empty() ? point() : pts.back();
+                    int64_t order = curve.find_order(G);
+                    
 
-     point G = pts.empty() ? point() : pts.back();
-     int64_t order = curve.find_order(G);
-     cout << "\nВыбранная точка: ";
-     ECDH::print_point(G);
-     cout << " порядок=" << order << "\n";
+                    int64_t da = curve.generate_private(order);
+                    int64_t db = curve.generate_private(order);
 
-     int64_t da = curve.generate_private(order);
-     int64_t db = curve.generate_private(order);
+                    
 
-     cout << "da=" << da << " db=" << db << "\n";
+                    // публичные ключи
+                    point Qa = curve.mul(G, da);
+                    point Qb = curve.mul(G, db);
+                   
 
-     // публичные ключи
-     point Qa = curve.mul(G, da);
-     point Qb = curve.mul(G, db);
-     cout << "Qa = ";
-     ECDH::print_point(Qa);
-     cout << "\n";
-     cout << "Qb = ";
-     ECDH::print_point(Qb);
-     cout << "\n";
+                    // общий секрет
+                    point Sa = curve.mul(Qb, da);
+                    point Sb = curve.mul(Qa, db);
+                    
+                    std::ofstream out;          // поток для записи
+                    out.open("curves.txt", ios::app); 
+                    if (Sa == Sb){
+                         cout << "Shared secret совпадает.\n";
+                         if (out.is_open()){
+                              out << "A=" << A << " B=" << B << " P=" << P << endl;
+                              out.close();
+                         }
+                         
 
-     // общий секрет
-     point Sa = curve.mul(Qb, da);
-     point Sb = curve.mul(Qa, db);
-     cout << "Sa = ";
-     ECDH::print_point(Sa);
-     cout << "\n";
-     cout << "Sb = ";
-     ECDH::print_point(Sb);
-     cout << "\n";
-
-     if (Sa == Sb)
-          cout << "Shared secret совпадает.\n";
-     else
-          cout << "Ошибка: секреты не совпадают!\n";
-
+                    }
+                    else{
+                         cout << "Ошибка: секреты не совпадают!\n";
+                    }
+               
+               }
+          }
+     }
      return 0;
 }
