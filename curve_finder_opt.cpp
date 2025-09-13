@@ -156,53 +156,71 @@ public:
 
           int64_t bound = P + 1 + (int64_t)(2 * floor(sqrt((long double)P)));
           int64_t m = (int64_t)ceil(sqrt((long double)bound));
-          
+
           unordered_map<point, int64_t, point_hash> baby;
           baby.reserve(m + 1);
+
+          // baby steps
+          point cur;
           for (int64_t j = 0; j <= m; ++j)
           {
-               point t = mul(Pnt, j);
-               baby.emplace(t, j);
+               baby.emplace(cur, j);
+               cur = add(cur, Pnt);
           }
 
+          // giant steps
           point mP = mul(Pnt, m);
-          point neg_mP = negate(mP);
-
-          point cur;
-          for (int64_t k = 0; k <= m; ++k)
+          point giant;
+          for (int64_t k = 1; k <= m + 1; ++k)
           {
-               auto it = baby.find(cur);
+               giant = add(giant, mP);
+               auto it = baby.find(giant);
                if (it != baby.end())
                {
                     int64_t j = it->second;
-                    int64_t candidate = j + k * m;
+                    int64_t candidate = k * m - j;
                     if (candidate > 0)
                     {
-                         point test = mul(Pnt, candidate);
-                         if (test.is_infinity)
+                         if (mul(Pnt, candidate).is_infinity)
                               return candidate;
                     }
                }
-
-               cur = add(cur, neg_mP);
           }
           return -1;
      }
 
+
      vector<point> list_points(bool print = false)
      {
           vector<point> pts;
+
           for (int64_t x = 0; x < P; ++x)
           {
-               int64_t rhs = mod((int64_t)x * x % P * x + A * x + B);
-               for (int64_t y = 0; y < P; ++y)
+               int64_t rhs = mod(((x * x) % P * x + A * x + B) % P);
+
+               // Проверяем, является ли rhs квадратичным вычетом по модулю P
+               if (rhs == 0)
                {
-                    if (mod(y * y) == rhs)
+                    pts.emplace_back(x, 0);
+                    continue;
+               }
+
+               if (mod_pow(rhs, (P - 1) / 2) == 1) // символ Лежандра == 1
+               {
+                    // На малом P можно просто найти y перебором
+                    for (int64_t y = 1; y < P; ++y)
                     {
-                         pts.emplace_back(x, y);
+                         if (mod(y * y) == rhs)
+                         {
+                              pts.emplace_back(x, y);
+                              if (y != 0)
+                              pts.emplace_back(x, P - y); // второй корень
+                              break;
+                         }
                     }
                }
           }
+
           if (print)
           {
                for (auto &pt : pts)
@@ -210,8 +228,10 @@ public:
                     cout << "P=(" << pt.x << "," << pt.y << ") ord=" << find_order(pt) << "\n";
                }
           }
+
           return pts;
      }
+
 
      bool is_generator_of_order(const point &G, int64_t order)
      {
@@ -294,7 +314,7 @@ int main()
                     point Sb = curve.mul(Qa, db);
                     
                     std::ofstream out;          // поток для записи
-                    out.open("curves.txt", ios::app); 
+                    out.open("curves2.txt", ios::app); 
                     if (Sa == Sb){
                          cout << "Shared secret совпадает.\n";
                          if (out.is_open()){
