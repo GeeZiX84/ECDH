@@ -5,11 +5,13 @@
 #include <cmath>
 #include <cstdint>
 #include <chrono>
-using namespace std;
+#include <functional>
+
+
 #include <boost/multiprecision/cpp_int.hpp>
 #include <fstream>
 
-
+using namespace std;
 struct point
 {
      int64_t x;
@@ -18,6 +20,7 @@ struct point
      point() : x(0), y(0), is_infinity(true) {}
      point(int64_t x, int64_t y) : x(x), y(y), is_infinity(false) {}
 };
+
 
 struct point_hash
 {
@@ -32,6 +35,35 @@ struct point_hash
      }
 };
 
+struct int64_hash
+{
+    size_t operator()(const int64_t &x) const noexcept
+    {
+        // Базовый хэш от числа
+        size_t h1 = std::hash<int64_t>()(x);
+
+        // Немного "перемешаем" для лучшего распределения
+        return h1 ^ (0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
+    }
+};
+
+std::ostream& operator<<(std::ostream& os, const point& p)
+{
+    if (p.is_infinity)
+    {
+        os << " ";
+    }
+    else
+    {
+        os << p.x << "," << p.y << ",";
+    }
+
+    
+    point_hash hasher;
+    os << hasher(p) << ",";
+
+    return os;
+}
 bool operator==(const point &a, const point &b) noexcept
 {
      if (a.is_infinity && b.is_infinity)
@@ -51,6 +83,9 @@ private:
 
 public:
      ECDH(int64_t a, int64_t b, int64_t p) : A(a), B(b), P(p){}
+     
+     
+
      
      int64_t mod(int64_t x) const
      {
@@ -269,7 +304,7 @@ public:
      int64_t generate_private(int64_t order)
      {
           if (order <= 2)
-               throw runtime_error("order too small");
+               return -1;
           std::uniform_int_distribution<int64_t> dist(1, order - 1);
           return dist(rng);
      }
@@ -285,55 +320,82 @@ public:
 
 int main()
 {
+     //std::ifstream pstream("primes.txt");
+     std::ofstream out;          // поток для записи
+     out.open("D:/GitHub/ECDH/curves2.txt", ios::app); 
+
+     out << "A," << "B," << "P,"
+     << "private_key_a," << "private_key_b,"
+     << "x_a,y_a,hashpoint_a," << "x_b,y_b,hashpoint_b,"
+     << "x_secret,y_secret,secret_in_hash," << "order," << " time(ms)" << endl;
+     out.close();
      auto start2 = chrono::high_resolution_clock::now();
-     for (int64_t A = 0; A < 100; A++){
-          for (int64_t B = 0; B < 100; B++){
-               if (4 * A * A * A + 27 * B * B != 0){
-                    auto start = chrono::high_resolution_clock::now();
-                    int64_t P = 2267; 
-                    ECDH curve(A, B, P);
-                    
-                    auto pts = curve.list_points();
-
-                    point G = pts.empty() ? point() : pts.back();
-                    int64_t order = curve.find_order(G);
-                    
-
-                    int64_t da = curve.generate_private(order);
-                    int64_t db = curve.generate_private(order);
-
-                    
-
-                    // публичные ключи
-                    point Qa = curve.mul(G, da);
-                    point Qb = curve.mul(G, db);
-                   
-
-                    // общий секрет
-                    point Sa = curve.mul(Qb, da);
-                    point Sb = curve.mul(Qa, db);
-                    
-                    std::ofstream out;          // поток для записи
-                    out.open("curves2.txt", ios::app); 
-                    if (Sa == Sb){
-                         cout << "Shared secret совпадает.\n";
-                         if (out.is_open()){
-                              auto stop = chrono::high_resolution_clock::now();
-                              auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
-                               
-                              out << "A=" << A << " B=" << B << " P=" << P << " Время=" << duration.count() << endl;
-                              out.close();
+     int64_t P = 2003;
+     //while (pstream >> P) {
+          for (int64_t A = 1; A < 100; A++){
+               for (int64_t B = 1; B < 100; B++){
+                    if ((4 * A * A * A + 27 * B * B)%P != 0){
+                         auto start = chrono::high_resolution_clock::now(); 
+                         ECDH curve(A, B, P);
+                         
+                         
+                         point G;
+                         int64_t order;
+                         for (auto pt : curve.list_points(false)) {
+                              if (pt.is_infinity) continue;
+                              int64_t ord = curve.find_order(pt);
+                              if (ord > P) { 
+                                   G = pt;
+                                   order = ord; 
+                                   break; 
+                              }
                          }
                          
+                         
+                         
+                         if (curve.is_generator_of_order(G, order) == false) {
+                              continue;
+                         }
+                         
+                         int64_t da = curve.generate_private(order);
+                         int64_t db = curve.generate_private(order);
+                         
+                         
 
-                    }
-                    else{
-                         cout << "Ошибка: секреты не совпадают!\n";
-                    }
+                         // публичные ключи
+                         point Qa = curve.mul(G, da);
+                         point Qb = curve.mul(G, db);
+                    
+
+                         // общий секрет
+                         point Sa = curve.mul(Qb, da);
+                         point Sb = curve.mul(Qa, db);
+                         int64_hash hasher;
+                         std::ofstream out;          // поток для записи
+                         out.open("D:/GitHub/ECDH/curves2.txt", ios::app); 
+
+                         if (Sa == Sb){
+                              //cout << "Shared secret совпадает.\n";
+                              if (out.is_open()){
+                                   auto stop = chrono::high_resolution_clock::now();
+                                   auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
+                                  
+                                   out << A << "," << B << "," << P << "," 
+                                   << hasher(da) << "," << hasher(db) << "," << Qa << "" << Qb << ""
+                                   << Sa << "" << order << "," << duration.count() << endl;
+                                   out.close();
+                              }
+                              
+
+                         }
+                         else{
+                              cout << "Ошибка: секреты не совпадают!\n";
+                         }
                
+                    }
                }
           }
-     }
+     //}
      auto stop2 = chrono::high_resolution_clock::now();
      auto duration2 = chrono::duration_cast<chrono::milliseconds>(stop2 - start2);
      cout << "Total time taken: " << duration2.count() << " milliseconds" << endl;
