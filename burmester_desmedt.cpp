@@ -1,19 +1,22 @@
 // bd_example.cpp
 // Демонстрация: поиск генератора g и реализация протокола Burmester-Desmedt (BD).
 // Компиляция: g++ -std=c++17 -O2 bd_example.cpp -o bd_example
-
+#include <ostream>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <vector>
 #include <random>
 #include <iostream>
 #include <algorithm>
 #include <cstdint>
+#include <nlohmann/json.hpp>
+#include <fstream>
 
+using namespace std;
+using json = nlohmann::json;
 using boost::multiprecision::cpp_int;
 using std::vector;
 using std::uint64_t;
-using std::cout;
-using std::endl;
+
 
 // Возведение a^e mod m (быстрое возведение для cpp_int)
 cpp_int mod_pow(cpp_int a, cpp_int e, const cpp_int &m) {
@@ -104,6 +107,28 @@ cpp_int find_generator(const cpp_int &p) {
     return 0;
 }
 
+cpp_int find_generator_near_p(const cpp_int &p, int back_steps = 100) {
+    if (p <= 3) return 0;
+    cpp_int phi = p - 1;
+    auto primes = factorize_small(phi);
+    cpp_int start = p - 2;
+    cpp_int min_g = max<cpp_int>(2, p - 2 - back_steps);
+    for (cpp_int g = start; g >= min_g; --g) {
+        bool ok = true;
+        for (const cpp_int &q : primes) {
+            if (q == 0) continue;
+            cpp_int exp = phi / q;
+            if (mod_pow(g, exp, p) == 1) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) return g;
+    }
+    return 0;
+}
+
+
 // Генерация случайного cpp_int в диапазоне [1, max-1]
 cpp_int random_in_range(const cpp_int &max) {
     // используем mt19937_64 для генерации случайных бит
@@ -124,10 +149,11 @@ cpp_int random_in_range(const cpp_int &max) {
     r += 1;
     return r;
 }
-
+cpp_int time_proc = -1; // время выполнения протокола (глобальная для простоты)
 // BD-протокол: вход p,g,n — возвращает общий ключ и печатает шаги.
 cpp_int burmester_desmedt(const cpp_int &p, const cpp_int &g, int n, bool show_steps = true) {
-    // 1) каждый выбирает секрет x_i
+    chrono::high_resolution_clock::time_point proc_start = chrono::high_resolution_clock::now();
+    // 1) каждый пользователь U_i выбирает секрет x_i в [1, p
     vector<cpp_int> x(n);
     for (int i = 0; i < n; ++i) {
         x[i] = random_in_range(p - 1); // секрет в [1, p-2]
@@ -162,7 +188,8 @@ cpp_int burmester_desmedt(const cpp_int &p, const cpp_int &g, int n, bool show_s
     for (int i = 0; i < n; ++i) {
         K = (K * s[i]) % p;
     }
-
+    chrono::high_resolution_clock::time_point proc_end = chrono::high_resolution_clock::now();
+    time_proc = chrono::duration_cast<chrono::milliseconds>(proc_end - proc_start).count();
     if (show_steps) {
         cout << "\nОбщий ключ (из произведения s_{i,i+1}): K = " << K << "\n";
     }
@@ -182,49 +209,83 @@ cpp_int burmester_desmedt(const cpp_int &p, const cpp_int &g, int n, bool show_s
     }
     return K;
 }
-
-int main() {
-    // Два режима: демонстрационный для маленьких p (по умолчанию),
-    // и пример с вводом своих p,g (если хочется).
-    cout << "Burmester-Desmedt demo (C++).\n\n";
-
-    // Демонстрация на малом примере (как в диалоге): p=23, g=5, n=3
-    {
-        cpp_int p = 23;
-        cpp_int g = 5;
-        cout << "=== Демонстрация (p=23, g=5, n=3) ===\n";
-        burmester_desmedt(p, g, 3, true);
-        cout << "====================================\n\n";
-    }
-
-    // Пример: найдем генератор для входного небольшого простого p
-    {
-        cpp_int p;
-        cout << "Введите простое p для поиска генератора g (или 0 чтобы пропустить): ";
-        std::string sp;
-        std::cin >> sp;
-        try {
-            p = 0;
-            for (char c : sp) if (isdigit(c)) { p *= 10; p += (c - '0'); }
-        } catch(...) { p = 0; }
-        if (p != 0) {
-            cout << "Ищем генератор для p = " << p << " (факторизуем p-1 простым пробным делением)...\n";
-            cpp_int g = find_generator(p);
-            if (g == 0) {
-                cout << "Генератор не найден (возможно p слишком велико для пробного деления или p не простое).\n";
-            } else {
-                cout << "Найден g = " << g << "\n";
-                int n;
-                cout << "Введите количество участников n (>=3): ";
-                std::cin >> n;
-                if (n < 2) n = 3;
-                burmester_desmedt(p, g, n, true);
-            }
-        } else {
-            cout << "Пропуск ввода p.\n";
+cpp_int parse_number_to_cppint(const std::string &s_raw) {
+    std::string s = s_raw;
+    if (s.empty()) throw runtime_error("empty number string");
+    bool negative = false;
+    size_t pos = 0;
+    if (s[0] == '+') pos = 1;
+    if (s[pos] == '-') { negative = true; ++pos; }
+    std::string body = s.substr(pos);
+    cpp_int value = 0;
+    if (body.size() >= 2 && (body[0] == '0' && (body[1]=='x' || body[1]=='X'))) {
+        for (size_t i = 2; i < body.size(); ++i) {
+            char c = body[i];
+            int digit = 0;
+            if (c >= '0' && c <= '9') digit = c - '0';
+            else if (c >= 'a' && c <= 'f') digit = 10 + (c - 'a');
+            else if (c >= 'A' && c <= 'F') digit = 10 + (c - 'A');
+            else throw runtime_error("invalid hex char in " + body);
+            value <<= 4;
+            value += digit;
+        }
+    } else {
+        for (char c : body) {
+            if (c < '0' || c > '9') throw runtime_error("invalid decimal char in " + body);
+            value *= 10;
+            value += (c - '0');
         }
     }
+    if (negative) value = -value;
+    return value;
+}
+size_t get_key_size(const cpp_int& key) {
+    return key == 0 ? 0 : msb(abs(key)) + 1;
+}
 
+// Перегрузка: если ключ передан как hex-строка
+size_t get_key_size(const string& hex_key) {
+    string clean;
+    // Убираем возможный префикс 0x и пробелы
+    for (char c : hex_key)
+        if (!isspace(c)) clean.push_back(c);
+    if (clean.rfind("0x", 0) == 0 || clean.rfind("0X", 0) == 0)
+        clean = clean.substr(2);
+
+    cpp_int key("0x" + clean);
+    return get_key_size(key);
+}
+int main() {
+        std::ofstream out;
+        out.open("D:/GitHub/ECDH/bdcurves.txt", ios::app); 
+        if (!out.is_open()) { cerr << "Не удалось открыть BD.txt\n"; return 1; }
+        out << "p," << "g," << "time_proc," << "shared_key," << "time_ms," << "size_of_key" << endl;
+        out.close();
+        ifstream f("testbd.json");
+        if (!f.is_open()) { cerr << "Не удалось открыть test2.json\n"; return 1; }
+        json data; f >> data;
+     
+        for (size_t i = 0; i < data.size(); ++i) {
+            cpp_int p = parse_number_to_cppint(data[i]["field"]["p"].get<string>());
+            cpp_int g = find_generator_near_p(p, 1000);
+                
+                chrono::high_resolution_clock::time_point time_s = chrono::high_resolution_clock::now();
+
+                cpp_int K = burmester_desmedt(p, g, 4, true);
+                chrono::high_resolution_clock::time_point time_e = chrono::high_resolution_clock::now();
+                cpp_int time_m = chrono::duration_cast<chrono::milliseconds>(time_e - time_s).count();
+                std::ofstream out;          // поток для записи
+                out.open("D:/GitHub/ECDH/bdcurves.txt", ios::app); 
+                    if (out.is_open()){
+                            out << p << "," << g << "," << time_proc << "," << get_key_size(K) << "," << K << "," << time_m << endl;
+                            out.close();
+                    }
+                
+            
+        }
+    
     cout << "Готово.\n";
     return 0;
+    out.close();
+
 }
