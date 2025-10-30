@@ -20,8 +20,9 @@ struct point
      bool is_infinity;
      point() : x(0), y(0), is_infinity(true) {}
      point(cpp_int x, cpp_int y) : x(x), y(y), is_infinity(false) {}
-     size_t size() const noexcept {
-         return sizeof(point);
+     size_t size(point key) const noexcept
+     {
+          return key.x and key.y == 0 ? 0 : msb(abs(key.x)) + 1 + msb(abs(key.y)) + 1;
      }
 };
 
@@ -388,8 +389,7 @@ int main()
      std::ofstream out;
      out.open("D:/GitHub/ECDH/curves4.txt", ios::app); 
 
-     out << "A," << "B," << "P,"
-     << "time_gen(micros),time_prod(micros),"<<"shared_prod_x,shared_prod_y,"<< "shared_ring_x,shared_ring_y," << "order," << " time(ms)" << endl;
+     out << "a,b,p,время_генерации_общего_ключа_последовательным_умножением_мкс,время_генерации_общего_ключа_кольцевым_методом_мкс,x_координата_общего_ключа,y_координата_общего_ключа,размер_ключа,порядок_генератора,общее_время_мс" << endl;
      out.close();
      ifstream f("testbd.json");
      if (!f.is_open()) { cerr << "Не удалось открыть test2.json\n"; return 1; }
@@ -468,7 +468,7 @@ int main()
                     auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
                                   
                     out << a << "," << b << "," << p << "," << time_gen << "," << time_prod << ","
-                    <<shared_prod << shared_ring.size() << "," << order << "," << duration.count() << endl;
+                    <<shared_prod << shared_ring.size(shared_prod) << "," << order << "," << duration.count() << endl;
                     out.close();
                }
      }              

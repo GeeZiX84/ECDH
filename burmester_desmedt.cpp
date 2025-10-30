@@ -17,17 +17,36 @@ using boost::multiprecision::cpp_int;
 using std::vector;
 using std::uint64_t;
 
+// --------- Добавь эти определения (вместо старого time_proc и burmester_desmedt) ----------
+struct BDStats {
+    long long t_x_us = 0;      // время генерации секретов x
+    long long t_z_us = 0;      // время вычисления публичных z = g^x
+    long long t_s_us = 0;      // время вычисления s = z_{i+1}^{x_i}
+    long long t_K_us = 0;      // время финального умножения/проверки K
+    long long total_us = 0;    // полное время внутри функции
+    size_t key_bits = 0;       // размер ключа в битах (msb(p))
+};
 
 // Возведение a^e mod m (быстрое возведение для cpp_int)
-cpp_int mod_pow(cpp_int a, cpp_int e, const cpp_int &m) {
-    cpp_int res = 1;
-    a %= m;
-    while (e > 0) {
-        if ((e & 1) != 0) res = (res * a) % m;
-        a = (a * a) % m;
-        e >>= 1;
-    }
-    return res;
+cpp_int mod(cpp_int x, cpp_int P)
+{
+          cpp_int order = x % P;
+          if (order < 0)
+               order += P;
+          return order;
+}
+cpp_int mod_pow(cpp_int base, cpp_int exp, cpp_int P)
+{
+          base = mod(base, P);
+          cpp_int res = 1;
+          while (exp > 0)
+          {
+               if (exp & 1)
+                    res = (cpp_int)res * base % P;
+               base = (cpp_int)base * base % P;
+               exp >>= 1;
+          }
+          return res;
 }
 
 // Евклид - обратный элемент a^{-1} mod m (расширенный алгоритм Евклида).
@@ -131,16 +150,13 @@ cpp_int find_generator_near_p(const cpp_int &p, int back_steps = 100) {
 
 // Генерация случайного cpp_int в диапазоне [1, max-1]
 cpp_int random_in_range(const cpp_int &max) {
-    // используем mt19937_64 для генерации случайных бит
+    if (max <= 2) return 1;
     static std::random_device rd;
     static std::mt19937_64 gen(rd());
-    // получим число бит в max
-    std::string s = max.convert_to<std::string>();
-    // простейшая стратегия: генерируем случайную 64-битную последовательность и собираем
-    // Пока это не замечательный крипто-генератор, но для демонстрации хватит.
+    size_t bits = msb(max); // количество значимых бит
     cpp_int r = 0;
-    uint64_t chunks = 8; // 8*64 = 512 бит (достаточно для больших учебных p)
-    for (uint64_t i = 0; i < chunks; ++i) {
+    size_t chunks = (bits + 63) / 64;
+    for (size_t i = 0; i < chunks; ++i) {
         uint64_t v = gen();
         r <<= 64;
         r += v;
@@ -149,64 +165,87 @@ cpp_int random_in_range(const cpp_int &max) {
     r += 1;
     return r;
 }
-cpp_int time_proc = -1; // время выполнения протокола (глобальная для простоты)
+ // время выполнения протокола (глобальная для простоты)
 // BD-протокол: вход p,g,n — возвращает общий ключ и печатает шаги.
-cpp_int burmester_desmedt(const cpp_int &p, const cpp_int &g, int n, bool show_steps = true) {
-    chrono::high_resolution_clock::time_point proc_start = chrono::high_resolution_clock::now();
-    // 1) каждый пользователь U_i выбирает секрет x_i в [1, p
+// BD-протокол с детальными таймерами
+cpp_int burmester_desmedt(const cpp_int &p, const cpp_int &g, int n, BDStats &stats, bool show_steps = false) {
+    using chrono::high_resolution_clock;
+    using chrono::duration_cast;
+    using chrono::microseconds;
+
+    auto t_total_start = high_resolution_clock::now();
+
+    // 1) каждый пользователь U_i выбирает секрет x_i в [1, p-2]
+    auto t_x_start = high_resolution_clock::now();
     vector<cpp_int> x(n);
     for (int i = 0; i < n; ++i) {
-        x[i] = random_in_range(p - 1); // секрет в [1, p-2]
+        x[i] = random_in_range(p - 1); // secret in [1, p-2]
     }
+    auto t_x_end = high_resolution_clock::now();
+    stats.t_x_us = duration_cast<microseconds>(t_x_end - t_x_start).count();
 
-    // 2) вычисляем публичные z_i = g^{x_i} mod p и рассылаем
+    // 2) вычисляем публичные z_i = g^{x_i} mod p
+    auto t_z_start = high_resolution_clock::now();
     vector<cpp_int> z(n);
     for (int i = 0; i < n; ++i) {
         z[i] = mod_pow(g, x[i], p);
     }
+    auto t_z_end = high_resolution_clock::now();
+    stats.t_z_us = duration_cast<microseconds>(t_z_end - t_z_start).count();
 
     if (show_steps) {
         cout << "Параметры:\n p = " << p << "\n g = " << g << "\n n = " << n << "\n\n";
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0; i < n; ++i)
             cout << "U" << (i+1) << ": x_" << (i+1) << " = " << x[i] << "  z_" << (i+1) << " = " << z[i] << "\n";
-        }
         cout << "\n";
     }
 
-    // В BD часто вычисляют s_{i,i+1} = z_{i+1}^{x_i} = g^{x_i x_{i+1}}
+    // 3) вычисляем s_{i,i+1} = z_{i+1}^{x_i}
+    auto t_s_start = high_resolution_clock::now();
     vector<cpp_int> s(n);
     for (int i = 0; i < n; ++i) {
         int nxt = (i + 1) % n;
         s[i] = mod_pow(z[nxt], x[i], p);
-        if (show_steps) {
-            cout << "s_" << (i+1) << ("," ) << (nxt+1) << " = g^{x_" << (i+1) << " x_" << (nxt+1) << "} = " << s[i] << "\n";
-        }
     }
+    auto t_s_end = high_resolution_clock::now();
+    stats.t_s_us = duration_cast<microseconds>(t_s_end - t_s_start).count();
 
-    // общий ключ K = prod_{i=1..n} s_{i,i+1} mod p = g^{sum x_i x_{i+1}}
+    // 4) общий ключ K = prod s[i] mod p
+    auto t_K_start = high_resolution_clock::now();
     cpp_int K = 1;
     for (int i = 0; i < n; ++i) {
         K = (K * s[i]) % p;
     }
-    chrono::high_resolution_clock::time_point proc_end = chrono::high_resolution_clock::now();
-    time_proc = chrono::duration_cast<chrono::milliseconds>(proc_end - proc_start).count();
-    if (show_steps) {
-        cout << "\nОбщий ключ (из произведения s_{i,i+1}): K = " << K << "\n";
-    }
-
-    // проверим альтернативной формулой: возвести g^{sum(x_i x_{i+1})}
+    // проверка (не учитываем отдельно экспоненциацию, если нужно — можно)
     cpp_int sum = 0;
     for (int i = 0; i < n; ++i) {
         int nxt = (i + 1) % n;
         sum += x[i] * x[nxt];
     }
     cpp_int K2 = mod_pow(g, sum, p);
+    auto t_K_end = high_resolution_clock::now();
+    stats.t_K_us = duration_cast<microseconds>(t_K_end - t_K_start).count();
+
+    auto t_total_end = high_resolution_clock::now();
+    stats.total_us = duration_cast<microseconds>(t_total_end - t_total_start).count();
+
+    // ключ и размер в битах
+    
+
     if (show_steps) {
-        cout << "Проверка: sum = " << sum << "\n";
-        cout << "g^{sum} mod p = " << K2 << "\n";
-        if (K == K2) cout << "Проверка пройдена: K == g^{sum}\n";
-        else cout << "Ошибка: K != g^{sum}\n";
+        cout << "\ns-значения:\n";
+        for (int i = 0; i < n; ++i)
+            cout << "s_" << (i+1) << "," << ((i+1)%n)+1 << " = " << s[i] << "\n";
+        cout << "\nK = " << K << "\n";
+        cout << "Проверка: g^{sum} = " << K2 << (K == K2 ? " (OK)\n" : " (MISMATCH)\n");
+        cout << "\nТайминги (в мс):\n"
+             << " gen x: " << stats.t_x_us/1000.0 << " ms\n"
+             << " calc z: " << stats.t_z_us/1000.0 << " ms\n"
+             << " calc s: " << stats.t_s_us/1000.0 << " ms\n"
+             << " final K: " << stats.t_K_us/1000.0 << " ms\n"
+             << " total:   " << stats.total_us/1000.0 << " ms\n";
     }
+
     return K;
 }
 cpp_int parse_number_to_cppint(const std::string &s_raw) {
@@ -259,7 +298,7 @@ int main() {
         std::ofstream out;
         out.open("D:/GitHub/ECDH/bdcurves.txt", ios::app); 
         if (!out.is_open()) { cerr << "Не удалось открыть BD.txt\n"; return 1; }
-        out << "p," << "g," << "time_proc," << "shared_key," << "time_ms," << "size_of_key" << endl;
+        out << "p,g,время_генерации_ключа_мкс,размер_ключа,общий_ключ,общее_время_мс" << endl;
         out.close();
         ifstream f("testbd.json");
         if (!f.is_open()) { cerr << "Не удалось открыть test2.json\n"; return 1; }
@@ -271,13 +310,15 @@ int main() {
                 
                 chrono::high_resolution_clock::time_point time_s = chrono::high_resolution_clock::now();
 
-                cpp_int K = burmester_desmedt(p, g, 4, true);
+                 BDStats stats;
+        // show_steps=false чтобы замеры не портила печать
+                cpp_int K = burmester_desmedt(p, g, 4, stats, false);
                 chrono::high_resolution_clock::time_point time_e = chrono::high_resolution_clock::now();
                 cpp_int time_m = chrono::duration_cast<chrono::milliseconds>(time_e - time_s).count();
                 std::ofstream out;          // поток для записи
                 out.open("D:/GitHub/ECDH/bdcurves.txt", ios::app); 
                     if (out.is_open()){
-                            out << p << "," << g << "," << time_proc << "," << get_key_size(K) << "," << K << "," << time_m << endl;
+                            out << p << "," << g << "," << stats.t_x_us + stats.t_z_us + stats.t_s_us + stats.t_K_us << "," << get_key_size(K) << "," << K << "," << stats.total_us << endl;
                             out.close();
                     }
                 
