@@ -284,9 +284,9 @@ public:
 
 int main()
 {
-     int64_t A = 2;
-     int64_t B = 2;
-     int64_t P = 17; // 2^256 - 2^32 - 977
+     int64_t A = 26;
+     int64_t B = 10;
+     int64_t P = 4013; // 2^256 - 2^32 - 977
      ECDH curve(A, B, P);
 
      cout << "Все точки кривой:\n";
