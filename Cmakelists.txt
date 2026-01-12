@@ -1,0 +1,83 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(ECDH
+    VERSION 1.0
+    LANGUAGES CXX
+)
+
+# ===============================
+# Standard
+# ===============================
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# ===============================
+# Sources
+# ===============================
+file(GLOB_RECURSE ECDH_SOURCES
+    src/*.cpp
+)
+
+file(GLOB_RECURSE ECDH_HEADERS
+    include/*.h
+)
+
+# ===============================
+# Library
+# ===============================
+add_library(ecdh_lib
+    ${ECDH_SOURCES}
+    ${ECDH_HEADERS}
+)
+
+target_include_directories(ecdh_lib
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+# ===============================
+# MinGW / Windows specific
+# ===============================
+if (MINGW)
+    message(STATUS "Configuring for MinGW-w64")
+
+    # Typical MinGW-w64 include paths
+    target_include_directories(ecdh_lib
+        SYSTEM PUBLIC
+            /mingw64/include
+            /mingw64/include/winapi
+            /mingw64/include/shared
+            /mingw64/include/um
+            /mingw64/include/ucrt
+    )
+
+    target_link_libraries(ecdh_lib
+        PUBLIC
+            bcrypt
+            advapi32
+    )
+endif()
+
+# ===============================
+# Demo executable (optional)
+# ===============================
+if (EXISTS "${PROJECT_SOURCE_DIR}/examples/ecdh_demo.cpp")
+    add_executable(ecdh_demo
+        examples/ecdh_demo.cpp
+    )
+
+    target_link_libraries(ecdh_demo
+        PRIVATE ecdh_lib
+    )
+else()
+    message(STATUS "ecdh_demo.cpp not found, demo target will not be built")
+endif()
+# ===============================
+# Warnings
+# ===============================
+if (MSVC)
+    target_compile_options(ecdh_lib PRIVATE /W4)
+else()
+    target_compile_options(ecdh_lib PRIVATE -Wall -Wextra -Wpedantic)
+endif()
