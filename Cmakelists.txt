@@ -6,78 +6,104 @@ project(ECDH
 )
 
 # ===============================
-# Standard
+# C++ standard
 # ===============================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ===============================
-# Sources
+# Build type default
+# ===============================
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type" FORCE)
+endif()
+
+# ===============================
+# Source files
 # ===============================
 file(GLOB_RECURSE ECDH_SOURCES
-    src/*.cpp
-)
-
-file(GLOB_RECURSE ECDH_HEADERS
-    include/*.h
+    ${PROJECT_SOURCE_DIR}/src/*.cpp
 )
 
 # ===============================
-# Library
+# Core library
 # ===============================
 add_library(ecdh_lib
     ${ECDH_SOURCES}
-    ${ECDH_HEADERS}
 )
 
+# ===============================
+# Include directories
+# ===============================
 target_include_directories(ecdh_lib
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
 
 # ===============================
-# MinGW / Windows specific
+# Dependencies
 # ===============================
-if (MINGW)
-    message(STATUS "Configuring for MinGW-w64")
+# nlohmann/json (header-only)
+find_package(nlohmann_json 3.2.0 QUIET)
+if(nlohmann_json_FOUND)
+    target_link_libraries(ecdh_lib PUBLIC nlohmann_json::nlohmann_json)
+endif()
 
-    # Typical MinGW-w64 include paths
-    target_include_directories(ecdh_lib
-        SYSTEM PUBLIC
-            /mingw64/include
-            /mingw64/include/winapi
-            /mingw64/include/shared
-            /mingw64/include/um
-            /mingw64/include/ucrt
-    )
-
-    target_link_libraries(ecdh_lib
-        PUBLIC
-            bcrypt
-            advapi32
-    )
+# Boost Multiprecision
+find_package(Boost 1.71 REQUIRED COMPONENTS multiprecision)
+if(Boost_FOUND)
+    target_include_directories(ecdh_lib PUBLIC ${Boost_INCLUDE_DIRS})
 endif()
 
 # ===============================
-# Demo executable (optional)
+# Windows system libraries
 # ===============================
-if (EXISTS "${PROJECT_SOURCE_DIR}/examples/ecdh_demo.cpp")
-    add_executable(ecdh_demo
-        examples/ecdh_demo.cpp
-    )
+if(WIN32)
+    if(MINGW)
+        message(STATUS "Configuring for MinGW-w64")
 
-    target_link_libraries(ecdh_demo
-        PRIVATE ecdh_lib
-    )
-else()
-    message(STATUS "ecdh_demo.cpp not found, demo target will not be built")
+        target_include_directories(ecdh_lib
+            SYSTEM PUBLIC
+                /mingw64/include
+                /mingw64/include/winapi
+                /mingw64/include/shared
+                /mingw64/include/um
+                /mingw64/include/ucrt
+        )
+
+        target_link_libraries(ecdh_lib
+            PUBLIC
+                bcrypt
+                advapi32
+        )
+    endif()
 endif()
+
 # ===============================
-# Warnings
+# Compiler warnings
 # ===============================
-if (MSVC)
-    target_compile_options(ecdh_lib PRIVATE /W4)
+if(MSVC)
+    target_compile_options(ecdh_lib PRIVATE /W4 /permissive-)
 else()
     target_compile_options(ecdh_lib PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# ===============================
+# Demo executable
+# ===============================
+if(EXISTS "${PROJECT_SOURCE_DIR}/examples/ecdh_demo.cpp")
+    add_executable(ecdh_demo
+        ${PROJECT_SOURCE_DIR}/examples/ecdh_demo.cpp
+    )
+
+    target_link_libraries(ecdh_demo PRIVATE ecdh_lib)
+
+    # Все exe будут в bin/
+    set_target_properties(ecdh_demo PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin
+    )
+else()
+    message(STATUS "examples/ecdh_demo.cpp not found — demo target will not be built")
+endif()
+

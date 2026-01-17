@@ -19,6 +19,18 @@ https://github.com/GeeZiX84/ECDH
 
 ---
 
+## Documentation
+
+- [Scientific paper (interactive)](docs/paper.md)
+- [Theory vs Implementation](docs/theory_vs_code.md)
+- [Differences: Theory vs Code](docs/differences_theory_code.md)
+- [Analytical report (ECDH vs BD, PDF)](docs/analysis_ecdh_bd.pdf)
+- [Python analysis](docs/analysis_ecdh_bd.pdf)
+- [README на русском](README_RU.md)
+
+---
+
+
 ## Project Goals
 
 - implement finite field arithmetic over prime fields
@@ -52,11 +64,19 @@ ECDH/
 
 ## Build Requirements
 
-- C++17 or newer
+### C++ Implementation
+
+- C++17 (explicitly tested with GCC via MinGW-w64)
 - CMake >= 3.16
-- Compiler:
-  - Linux: GCC or Clang
-  - Windows: MinGW-w64 (x86_64)
+
+Supported environments:
+- Linux (GCC / Clang)
+- Windows x64 (MinGW-w64 with Windows SDK headers)
+
+The project relies on Windows SDK headers provided by MinGW-w64
+(e.g. `ncrypt.h`, `bcrypt.h`, `cert*`, `cfgmgr32.h`) when built on Windows and headers from [boost/multiprecision](https://github.com/boostorg/multiprecision), [nlohmann/json](https://github.com/J08nY/ecgen?tab=readme-ov-file). JSON by nlohman was used for reading json that was generated with [J08nY's "ecgen"](https://github.com/J08nY/ecgen?tab=readme-ov-file).
+
+No third-party cryptographic libraries are used.
 
 ---
 
@@ -96,6 +116,8 @@ cmake --build build
 4. Python code is used only for analytical evaluation
 
 This project must not be used in production cryptographic systems.
+
+[In realisation of this project was used tool "ecgen" for generating ecliptic curves by J08nY](https://github.com/J08nY/ecgen?tab=readme-ov-file')
 
 ---
 
